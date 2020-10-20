@@ -7,6 +7,9 @@ namespace HashConverter
 {
     public class Program
     {
+        private const string V2Charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/";
+        private const int BitMask8Bit = 0xff;
+
         private static readonly byte[] LotusMagicTable =
         {
             0xbd, 0x56, 0xea, 0xf2, 0xa2, 0xf1, 0xac, 0x2a, 0xb0, 0x93, 0xd1, 0x9c, 0x1b, 0x33, 0xfd, 0xd0, 0x30, 0x04,
@@ -37,6 +40,17 @@ namespace HashConverter
 
             var hash = $"({BitConverter.ToString(state.ToArray()).Replace("-", string.Empty)})";
             Console.WriteLine($"Domino 5 Hash: {hash}");
+
+            const int offset = 2;
+            string base64Part = hashTarget.Substring(offset, hashTarget.Length - offset - 1);
+            string salt6Buf = Domino6Decode(base64Part);
+            string saltPart = salt6Buf.Substring(0, 5);
+            savedKey = Encoding.ASCII.GetBytes(saltPart + hash).ToList();
+            state = DominoBigMd(ref savedKey, 34);
+            string hashBuf = BitConverter.ToString(state.ToArray()).Replace("-", string.Empty);
+            var tempHash = $"(G{DominoEncode(Encoding.ASCII.GetBytes(saltPart+hashBuf))})";
+            Console.WriteLine($"Domino 6 Hash: {tempHash}");
+            
             Console.WriteLine($"Target Hash: {hashTarget}");
         }
 
@@ -97,7 +111,7 @@ namespace HashConverter
             {
                 for (byte j = 0; j < 48; j++)
                 {
-                    p = Convert.ToByte((p + 48 - j) & 0xff);
+                    p = Convert.ToByte((p + 48 - j) & BitMask8Bit);
                     p = Convert.ToByte(x[j] ^ LotusMagicTable[p]);
                     x[j] = p;
                 }
@@ -127,6 +141,76 @@ namespace HashConverter
             {
                 block.Add((byte)value);
             }
+        }
+
+        private static string Domino6Decode(string base64Part)
+        {
+            var decoded = string.Empty;
+
+            for (var i = 0; i < base64Part.Length; i += 4)
+            {
+                int substringLength = i + 4 > base64Part.Length ? base64Part.Length - i : 4;
+                int num = DominoBase64Decode(base64Part.Substring(i, substringLength), substringLength);
+                
+                decoded += Convert.ToChar((num >> 16) & BitMask8Bit) + Convert.ToChar((num >> 8) & BitMask8Bit) + Convert.ToChar(num & BitMask8Bit);
+            }
+
+            var salt = new StringBuilder(decoded.Substring(0, 5));
+            int byte10 = Convert.ToByte(salt[3]) - 4;
+            if (byte10 < 0)
+                byte10 += 256;
+
+            salt[3] = Convert.ToChar(byte10);
+            return salt.ToString();
+        }
+
+        private static int DominoBase64Decode(string stringPart, int iterations)
+        {
+            var ret = 0;
+            var i = 1;
+
+            while (i <= iterations)
+            {
+                int index = V2Charset.IndexOf(stringPart[iterations - i]) & 0x3f;
+                ret += index << (6 * (i - 1));
+                i += 1;
+            }
+
+            return ret;
+        }
+
+        private static string DominoEncode(IList<byte> final)
+        {
+            int byte10 = final[3] + 4;
+            if (byte10 > 255)
+            {
+                byte10 -= 256;
+            }
+
+            final[3] = (byte) byte10;
+
+            var passwd = string.Empty;
+
+            for (var i = 0; i < 15; i += 3)
+            {
+                passwd += DominoBase64Encode((final[i] << 16) | (final[i+1] << 8) | final[i+2], 4);
+            }
+
+            return passwd.Remove(passwd.Length - 1, 1);
+        }
+
+        private static string DominoBase64Encode(int v, int n)
+        {
+            var ret = "";
+
+            while (n - 1 >= 0)
+            {
+                n -= 1;
+                ret = V2Charset.Substring(v & 0x3f, 1) + ret;
+                v >>= 6;
+            }
+
+            return ret;
         }
     }
 }
