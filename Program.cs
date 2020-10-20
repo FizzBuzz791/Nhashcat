@@ -33,26 +33,28 @@ namespace HashConverter
 
             List<byte> savedKey = Encoding.ASCII.GetBytes(wordBuf).ToList();
 
-            IEnumerable<byte> state = DominoBigMd(savedKey, savedKey.Count);
+            List<byte> state = DominoBigMd(ref savedKey, savedKey.Count);
 
-            var hash = $"(H*{string.Join(string.Empty, state.Select(Convert.ToChar))})";
+            var hash = $"({BitConverter.ToString(state.ToArray()).Replace("-", string.Empty)})";
             Console.WriteLine($"Domino 5 Hash: {hash}");
             Console.WriteLine($"Target Hash: {hashTarget}");
         }
 
-        private static IEnumerable<byte> DominoBigMd(IReadOnlyCollection<byte> savedKey, int length)
+        private static List<byte> DominoBigMd(ref List<byte> savedKey, int size)
         {
+            savedKey = savedKey.Take(size).ToList();
+            
             var state = new List<byte>(Enumerable.Repeat<byte>(0, 16));
             var checksum = new List<byte>(Enumerable.Repeat<byte>(0, 16));
 
             int currentPosition;
-            for (currentPosition = 0; currentPosition + 16 < length; currentPosition += 16)
+            for (currentPosition = 0; currentPosition + 16 < size; currentPosition += 16)
             {
                 List<byte> currentBlock = savedKey.Take(16).ToList();
                 MdTransform(ref state, ref checksum, ref currentBlock);
             }
 
-            int left = length - currentPosition;
+            int left = size - currentPosition;
             List<byte> block = savedKey.Take(16).ToList();
 
             Pad16(ref block, left);
@@ -76,10 +78,7 @@ namespace HashConverter
 
             for (var i = 0; i < 16; i++)
             {
-                byte firstVal = x[0 + i];
-                byte secondVal = x[16 + i];
-                firstVal ^= secondVal;
-                x.Add(firstVal);
+                x.Add(Convert.ToByte(x[0 + i] ^ x[16 + i]));
             }
 
             LotusMix(ref x);
@@ -92,17 +91,15 @@ namespace HashConverter
 
         private static void LotusMix(ref List<byte> x)
         {
-            var p = 0;
+            byte p = 0;
 
             for (var i = 0; i < 18; i++)
             {
-                for (var j = 0; j < 48; j++)
+                for (byte j = 0; j < 48; j++)
                 {
-                    p = (p + 48 - j) & 0xff;
-
-                    byte c = LotusMagicTable[p];
-
-                    x[j] ^= c;
+                    p = Convert.ToByte((p + 48 - j) & 0xff);
+                    p = Convert.ToByte(x[j] ^ LotusMagicTable[p]);
+                    x[j] = p;
                 }
             }
         }
@@ -128,7 +125,6 @@ namespace HashConverter
 
             for (int i = offset; i < 16; i++)
             {
-                // Casting an int to a byte is lossy, but I don't know how else to do this.
                 block.Add((byte)value);
             }
         }
