@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Security.Cryptography;
 
 namespace HashConverter
 {
@@ -31,8 +32,8 @@ namespace HashConverter
 
         public static void Main()
         {
-            const string wordBuf = "Password1!"; // Input
-            const string hashTarget = "(GWAcsGfvOwCBnPBeLQwm)"; // Expected hash result of Input
+            const string wordBuf = "hashcat"; // Input
+            const string hashTarget = "(HsjFebq0Kh9kH7aAZYc7kY30mC30mC3KmC30mCluagXrvWKj1)"; // Expected hash result of Input
             
             Console.WriteLine($"Password: {wordBuf}");
 
@@ -58,12 +59,26 @@ namespace HashConverter
             if (hashTarget.StartsWith("(G"))
             {
                 Console.WriteLine(tempHash == hashTarget
-                    ? "Success, Domino 6 hash matches target hash!"
+                    ? "Success, Domino 8 hash matches target hash!"
                     : $"Hash {tempHash} does not match target {hashTarget}");
             }
+            // TODO: handle the possibility we get an unknown hash
             else
             {
-                Console.WriteLine("TODO: Domino 8 Hash");
+                var (targetDigest, salt, iterationBytes, chars) = Domino85xDecode(base64Part);
+                var iterations = Int32.Parse(Encoding.ASCII.GetString(iterationBytes));
+                var digest = GetDigest(tempHash, salt, iterations);
+                var domino8Hash = "";
+                if (digest.SequenceEqual(targetDigest))
+                {
+                    Console.WriteLine("Digests match");
+                    var final = salt.Concat(iterationBytes).Concat(chars).Concat(digest).ToArray();
+                    domino8Hash = $"(H{Domino85xEncode(final)})";
+                }
+
+                Console.WriteLine(domino8Hash == hashTarget
+                    ? $"Success, Domino 8 hash {domino8Hash} matches target hash {hashTarget}"
+                    : $"Hash {domino8Hash} does not match target {hashTarget}");
             }
         }
 
@@ -199,6 +214,62 @@ namespace HashConverter
             }
 
             return ret;
+        }
+
+        private static (byte[], byte[], byte[], byte[]) Domino85xDecode(string hash)
+        {
+            var decoded = new byte[hash.Length];
+            var idx = 0;
+            for (var i = 0; i < hash.Length; i += 4)
+            {
+                int substringLength = i + 4 > hash.Length ? hash.Length - i : 4;
+                int num = DominoBase64Decode(hash.Substring(i, substringLength), substringLength);
+
+                decoded[idx++] = (byte) ((num >> 16) & BitMask8Bit);
+                decoded[idx++] = (byte) ((num >> 8) & BitMask8Bit);
+                decoded[idx++] = (byte) (num & BitMask8Bit);
+            }
+
+            var salt = decoded.Take(16).ToArray(); 
+            var byte10 = salt[3] - 4;
+
+            if (byte10 < 0)
+                byte10 += 256;
+
+            salt[3] = (byte) byte10;
+
+            var iterationBytes = decoded.Skip(16).Take(10).ToArray();
+            var chars = decoded.Skip(26).Take(2).ToArray();       
+            var digest = decoded.Skip(28).Take(8).ToArray();      
+            
+            return (digest, salt, iterationBytes, chars);
+        }
+
+        private static string Domino85xEncode(byte[] final)
+        { 
+            var byte10 = final[3] + 4;
+
+            if (byte10 > 255)
+            {
+                byte10 = byte10 - 256;
+            }
+
+            final[3] = (byte) byte10;
+
+            var passwd = "";
+
+            for (var i = 0; i < 36; i += 3)
+            {
+                passwd += DominoBase64Encode((final[i] << 16) | (final[i+1] << 8) | final[i+2], 4);
+            }
+
+            return passwd;
+        }
+
+        private static byte[] GetDigest(string hash, byte[] salt, int iterations)
+        {
+            Rfc2898DeriveBytes pbkdf2 = new Rfc2898DeriveBytes(hash, salt, iterations);
+            return  pbkdf2.GetBytes(8);
         }
 
         private static string DominoEncode(IList<byte> final)
