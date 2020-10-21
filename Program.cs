@@ -33,6 +33,8 @@ namespace HashConverter
         {
             const string wordBuf = "Password1!"; // Input
             const string hashTarget = "(GWAcsGfvOwCBnPBeLQwm)"; // Expected hash result of Input
+            
+            Console.WriteLine($"Password: {wordBuf}");
 
             List<byte> savedKey = Encoding.ASCII.GetBytes(wordBuf).ToList();
 
@@ -43,15 +45,32 @@ namespace HashConverter
 
             const int offset = 2;
             string base64Part = hashTarget.Substring(offset, hashTarget.Length - offset - 1);
-            string salt6Buf = Domino6Decode(base64Part);
-            string saltPart = salt6Buf.Substring(0, 5);
-            savedKey = Encoding.ASCII.GetBytes(saltPart + hash).ToList();
-            state = DominoBigMd(ref savedKey, 34);
-            string hashBuf = BitConverter.ToString(state.ToArray()).Replace("-", string.Empty);
-            var tempHash = $"(G{DominoEncode(Encoding.ASCII.GetBytes(saltPart+hashBuf))})";
-            Console.WriteLine($"Domino 6 Hash: {tempHash}");
+            byte[] salt6Buf = Domino6Decode(base64Part);
             
-            Console.WriteLine($"Target Hash: {hashTarget}");
+            savedKey = salt6Buf.Concat(Encoding.ASCII.GetBytes(hash)).ToList();
+            state = DominoBigMd(ref savedKey, 34);
+            
+            List<byte> saltAndHashBytes = salt6Buf.ToList();
+            saltAndHashBytes.AddRange(state);
+            var tempHash = $"(G{DominoEncode(saltAndHashBytes)})";
+            Console.WriteLine($"Domino 6 Hash: {tempHash}");
+
+            if (hashTarget.StartsWith("(G"))
+            {
+                Console.WriteLine(tempHash == hashTarget
+                    ? "Success, Domino 6 hash matches target hash!"
+                    : $"Hash {tempHash} does not match target {hashTarget}");
+            }
+            else
+            {
+                Console.WriteLine("TODO: Domino 8 Hash");
+            }
+        }
+
+        // Helper - going to leave until we've done Domino 8.
+        private static void PrintArray<T>(string prefix, IEnumerable<T> array)
+        {
+            Console.WriteLine($"{prefix}{(!string.IsNullOrEmpty(prefix) ? ": " : "")}{string.Join(" ", array)}");
         }
 
         private static List<byte> DominoBigMd(ref List<byte> savedKey, int size)
@@ -59,17 +78,17 @@ namespace HashConverter
             savedKey = savedKey.Take(size).ToList();
             
             var state = new List<byte>(Enumerable.Repeat<byte>(0, 16));
-            var checksum = new List<byte>(Enumerable.Repeat<byte>(0, 16));
+            var checksum = new List<byte>(Enumerable.Repeat<byte>(0, 16)); // Size "defined" by the loop in LotusTransformPassword
 
             int currentPosition;
             for (currentPosition = 0; currentPosition + 16 < size; currentPosition += 16)
             {
-                List<byte> currentBlock = savedKey.Take(16).ToList();
+                List<byte> currentBlock = savedKey.Skip(currentPosition).Take(16).ToList();
                 MdTransform(ref state, ref checksum, ref currentBlock);
             }
 
             int left = size - currentPosition;
-            List<byte> block = savedKey.Take(16).ToList();
+            List<byte> block = savedKey.Skip(currentPosition).Take(16).ToList();
 
             Pad16(ref block, left);
             MdTransform(ref state, ref checksum, ref block);
@@ -143,25 +162,28 @@ namespace HashConverter
             }
         }
 
-        private static string Domino6Decode(string base64Part)
+        private static byte[] Domino6Decode(string base64Part)
         {
-            var decoded = string.Empty;
+            var decoded = new byte[base64Part.Length];
+            var index = 0;
 
             for (var i = 0; i < base64Part.Length; i += 4)
             {
                 int substringLength = i + 4 > base64Part.Length ? base64Part.Length - i : 4;
                 int num = DominoBase64Decode(base64Part.Substring(i, substringLength), substringLength);
-                
-                decoded += Convert.ToChar((num >> 16) & BitMask8Bit) + Convert.ToChar((num >> 8) & BitMask8Bit) + Convert.ToChar(num & BitMask8Bit);
+
+                decoded[index++] = Convert.ToByte((num >> 16) & BitMask8Bit);
+                decoded[index++] = Convert.ToByte((num >> 8) & BitMask8Bit);
+                decoded[index++] = Convert.ToByte(num & BitMask8Bit);
             }
 
-            var salt = new StringBuilder(decoded.Substring(0, 5));
-            int byte10 = Convert.ToByte(salt[3]) - 4;
+            byte[] salt = decoded.Take(5).ToArray();
+            int byte10 = salt[3] - 4;
             if (byte10 < 0)
                 byte10 += 256;
 
-            salt[3] = Convert.ToChar(byte10);
-            return salt.ToString();
+            salt[3] = Convert.ToByte(byte10);
+            return salt;
         }
 
         private static int DominoBase64Decode(string stringPart, int iterations)
