@@ -59,7 +59,7 @@ namespace HashConverter
             if (hashTarget.StartsWith("(G"))
             {
                 Console.WriteLine(tempHash == hashTarget
-                    ? "Success, Domino 8 hash matches target hash!"
+                    ? "Success, Domino 6 hash matches target hash!"
                     : $"Hash {tempHash} does not match target {hashTarget}");
             }
             // TODO: handle the possibility we get an unknown hash
